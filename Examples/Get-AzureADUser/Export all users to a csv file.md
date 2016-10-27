@@ -1,6 +1,6 @@
 ### Export users from your directory
 
-#### First, conntect to your directory using the Connect-AzureAD cmdlet
+#### First, connect to your directory using the Connect-AzureAD cmdlet
 
 PS C:\Users\rodejo> connect-azureadAccount                       
 
