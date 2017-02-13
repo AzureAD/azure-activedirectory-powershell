@@ -1,15 +1,15 @@
-﻿#Requires –Version 4
+﻿#Requires –Version 5
 
 <# 
  
 .SYNOPSIS
-	Contains data gathering, health checks, and additional utilities for AD FS server deployments.
+	AzureADUtils.psm1 is a Windows PowerShell module with some Azure AD helper functions for common administrative tasks
 
 .DESCRIPTION
 
 	Version: 1.0.0
 
-	GTPUtils.psm1 is a Windows PowerShell module with some helper functions common in customer questions
+	AzureADUtils.psm1 is a Windows PowerShell module with some Azure AD helper functions for common administrative tasks
 
 
 .DISCLAIMER
@@ -37,114 +37,107 @@ using System.Security.Cryptography.X509Certificates;
 
 public static class AdalHelper
 {
-    public static string ObtainAadAccessTokenByPromptingUserCredential(string aadTokenIssuerUri)
-        {
-            AuthenticationContext authenticationContext = new AuthenticationContext(aadTokenIssuerUri);
-            AuthenticationResult authenticationResult = authenticationContext.AcquireToken
-            (
-                resource: "https://graph.windows.net/",
-                clientId: "cf6d7e68-f018-4e0a-a7b3-126e053fb88d",
-                redirectUri: new Uri("urn:ietf:wg:oauth:2.0:oob"),
-                promptBehavior: PromptBehavior.Always,
-                userId: UserIdentifier.AnyUser,
-                extraQueryParameters: "nux=1"
-            );
+    public static string ObtainAadAccessTokenByPromptingUserCredential(string aadTokenIssuerUri, string resource, string clientId, string redirectUri)
+    {
+        AuthenticationContext authenticationContext = new AuthenticationContext(aadTokenIssuerUri);
+        AuthenticationResult authenticationResult = authenticationContext.AcquireToken
+        (
+            resource: resource,
+            clientId: clientId, 
+            redirectUri: new Uri(redirectUri),
+            promptBehavior: PromptBehavior.Always,
+            userId: UserIdentifier.AnyUser,
+            extraQueryParameters: "nux=1"
+        );
 
-            return authenticationResult.AccessToken;
-         }
+        return authenticationResult.AccessToken;
+    }
          
-    public static string ObtainAadAccessTokenSilent(string aadTokenIssuerUri, string username, SecureString password)
-        {
-            AuthenticationContext authenticationContext = new AuthenticationContext(aadTokenIssuerUri);
-            ClientCredential cc = new ClientCredential(username, password);
-            AuthenticationResult authenticationResult = authenticationContext.AcquireTokenSilent
-            (
-                resource: "https://graph.windows.net/",
-                clientCredential: cc,
-                userId: UserIdentifier.AnyUser
-            );
-            return authenticationResult.AccessToken;
-        }
+    public static string ObtainAadAccessTokenWia(string aadTokenIssuerUri, string resource, string clientId)
+    {
+        AuthenticationContext authenticationContext = new AuthenticationContext(aadTokenIssuerUri);
+        UserCredential uc = new UserCredential();
+        AuthenticationResult authenticationResult = authenticationContext.AcquireToken
+        (
+            resource: resource,
+            clientId: clientId,
+            userCredential: uc            
+        );
+        return authenticationResult.AccessToken;
+    }
 
 
-    public static string ObtainAadAccessTokenWithCert(string aadTokenIssuerUri, string clientId, X509Certificate2 cert)
-        {
-            AuthenticationContext authenticationContext = new AuthenticationContext(aadTokenIssuerUri);
-            ClientAssertionCertificate certCred = new ClientAssertionCertificate(clientId, cert);
-            AuthenticationResult authenticationResult = authenticationContext.AcquireToken
-            (
-                resource: "https://graph.windows.net/",
-                clientCertificate: certCred
-            );
-            return authenticationResult.AccessToken;
-        }
-
-
+    public static string ObtainAadAccessTokenWithCert(string aadTokenIssuerUri, X509Certificate2 cert, string resource, string clientId)
+    {
+        AuthenticationContext authenticationContext = new AuthenticationContext(aadTokenIssuerUri);
+        ClientAssertionCertificate certCred = new ClientAssertionCertificate(clientId, cert);
+        AuthenticationResult authenticationResult = authenticationContext.AcquireToken
+        (
+            resource: resource,
+            clientCertificate: certCred
+        );
+        return authenticationResult.AccessToken;
+    }
 }
 "@
 
-function Initialize-ActiveDirectoryAuthenticationLibrary(){
+function Initialize-ActiveDirectoryAuthenticationLibrary()
+{
    $moduleDirPath = [Environment]::GetFolderPath("MyDocuments") + "\WindowsPowerShell\Modules"
    $modulePath = $moduleDirPath + "\AzureADUtils"
 
-  
+   if (Test-Path $modulePath) 
+   {
+      $adalPackageDirectories = (Get-ChildItem -Path ($modulePath+"\Nugets") -Filter "Microsoft.IdentityModel.Clients.ActiveDirectory*" -Directory)
 
-  $adalPackageDirectories = (Get-ChildItem -Path ($modulePath+"\Nugets") -Filter "Microsoft.IdentityModel.Clients.ActiveDirectory*" -Directory)
+      $ADAL_Assembly = (Get-ChildItem "Microsoft.IdentityModel.Clients.ActiveDirectory.dll" -Path $adalPackageDirectories[$adalPackageDirectories.length-1].FullName -Recurse)
 
-  $ADAL_Assembly = (Get-ChildItem "Microsoft.IdentityModel.Clients.ActiveDirectory.dll" -Path $adalPackageDirectories[$adalPackageDirectories.length-1].FullName -Recurse)
+      $ADAL_WindowsForms_Assembly = (Get-ChildItem "Microsoft.IdentityModel.Clients.ActiveDirectory.WindowsForms.dll" -Path $adalPackageDirectories[$adalPackageDirectories.length-1].FullName -Recurse)
 
-  $ADAL_WindowsForms_Assembly = (Get-ChildItem "Microsoft.IdentityModel.Clients.ActiveDirectory.WindowsForms.dll" -Path $adalPackageDirectories[$adalPackageDirectories.length-1].FullName -Recurse)
-
-  if($ADAL_Assembly.Length -gt 0 -and $ADAL_WindowsForms_Assembly.Length -gt 0){
-    Write-Host "Loading ADAL Assemblies ..." -ForegroundColor Green
-    [System.Reflection.Assembly]::LoadFrom($ADAL_Assembly[0].FullName) | out-null
-    [System.Reflection.Assembly]::LoadFrom($ADAL_WindowsForms_Assembly.FullName) | out-null
-    $reqAssem = @($ADAL_Assembly[0].FullName, $ADAL_WindowsForms_Assembly.FullName)
-
-    Add-Type -ReferencedAssemblies $reqAssem -TypeDefinition $source -Language CSharp -IgnoreWarnings
-
-    return $true
-  }
-
-  else{
-    Write-Host "Fixing Active Directory Authentication Library package directories ..." -ForegroundColor Yellow
-    $adalPackageDirectories | Remove-Item -Recurse -Force | Out-Null
-    Write-Host "Not able to load ADAL assembly. Delete the Nugets folder under" $modulePath ", restart PowerShell session and try again ..."
-    return $false
-  }
+      if($ADAL_Assembly.Length -gt 0 -and $ADAL_WindowsForms_Assembly.Length -gt 0)
+      {
+        Write-Host "Loading ADAL Assemblies ..." -ForegroundColor Green
+        [System.Reflection.Assembly]::LoadFrom($ADAL_Assembly[0].FullName) | out-null
+        [System.Reflection.Assembly]::LoadFrom($ADAL_WindowsForms_Assembly.FullName) | out-null
+        $reqAssem = @($ADAL_Assembly[0].FullName, $ADAL_WindowsForms_Assembly.FullName)
+        Add-Type -ReferencedAssemblies $reqAssem -TypeDefinition $source -Language CSharp -IgnoreWarnings
+        return $true
+      }
+      else
+      {
+        Write-Host "Fixing Active Directory Authentication Library package directories ..." -ForegroundColor Yellow
+        $adalPackageDirectories | Remove-Item -Recurse -Force | Out-Null
+        Write-Host "Not able to load ADAL assembly. Delete the Nugets folder under" $modulePath ", restart PowerShell session and try again ..."
+        return $false
+      }
+    }
+    else
+    {
+        Write-Host "Current module is not part of the Powershell Module path. Please run Install-AzureADUtilsModule, restart the PowerShell session and try again.." -ForegroundColor Yellow
+    }
 }
 
-##Bootstrap the call
+#Bootstrap the initialization of ADAL
 Initialize-ActiveDirectoryAuthenticationLibrary
 
-Function Get-AzureADCertificateManifestInfo
-{
-    [CmdletBinding()]
-    param
-    (  
-        [Parameter(Mandatory=$true)]
-        [System.Security.Cryptography.X509Certificates.X509Certificate2]
-        $Certificate
-    )
+<# 
+ .Synopsis
+  Gets an access token based on a confidential client credential
 
-    $certBinaryInfo = $Certificate.GetRawCertData()
-    $certB64Info = [System.Convert]::ToBase64String($certBinaryInfo)
-    $certThumbprint = $Certificate.Thumbprint
-    $keyId = [System.Guid]::NewGuid().ToString()
+ .Description
+  This function returns a string with the access token for the Azure AD Graph API.
 
-    $result = New-Object -TypeName PSObject -Property @{
-        customKeyIdentifier = $certThumbprint
-        keyId = $keyId
-        type = "AsymmetricX509Cert"
-        usage = "Verify"
-        value = $certB64Info
-    }
+ .Parameter TenantDomain
+  The domain name of the tenant you want the token for.
 
-    Write-Output $result
+ .Parameter ClientCredential
+  A Powershell Credential with UserName=ClientID, Password=Application Key
 
-}
 
-Function Get-AzureADAcessTokenFromConfidentialClient
+ .Example
+   $accessToken = Get-AzureADGraphAPIAccessTokenFromAppKey -TenantDomain "contoso.com" -ClientCredential (Get-Credential)
+#>
+Function Get-AzureADGraphAPIAccessTokenFromAppKey
 {
     [CmdletBinding()]
     param
@@ -185,20 +178,83 @@ Function Get-AzureADAcessTokenFromConfidentialClient
 
 }
 
-Function Get-AzureADAccessTokenFromUser
+<# 
+ .Synopsis
+  Gets an access token based on a user credential using web authentication to access the Azure AD Graph API.
+
+ .Description
+  This function returns a string with the access token from a user. This will pop up a web authentication prompt for a user
+
+ .Parameter TenantDomain
+  The domain name of the tenant you want the token for.
+
+ .Parameter ClientId
+  The client ID of the application you want the token for
+  
+ .Parameter Redirect URI
+  Redirect URI for the OAuth request
+  
+
+ .Example
+   $accessToken = Get-AzureADGraphAPIAccessTokenFromUser -TenantDomain "contoso.com"
+#>
+Function Get-AzureADGraphAPIAccessTokenFromUser
 {
     [CmdletBinding()]
     param
     (
         [Parameter(Mandatory=$true)]
         [string]
-        $TenantDomain
+        $TenantDomain,
+        [Parameter(Mandatory=$true)]
+        [string]
+        $ClientId,
+        [Parameter(Mandatory=$true, ParameterSetName="PromptUserCredential")]
+        [string]
+        $RedirectUri,
+        [Parameter(ParameterSetName="WIA")]
+        [switch]
+        $WindowsAuthentication
+
     )
-    $AadToken = [AdalHelper]::ObtainAadAccessTokenByPromptingUserCredential("https://login.windows.net/$TenantDomain/");
-    Write-Output $AadToken
+    if ($WindowsAuthentication)
+    {
+        $AadToken = [AdalHelper]::ObtainAadAccessTokenWia("https://login.windows.net/$TenantDomain/", "https://graph.windows.net/", $ClientId);
+        Write-Output $AadToken
+    }
+    else
+    {
+        
+
+        $AadToken = [AdalHelper]::ObtainAadAccessTokenByPromptingUserCredential("https://login.windows.net/$TenantDomain/", "https://graph.windows.net/", $ClientId, $RedirectUri);
+        Write-Output $AadToken
+    }
 }
 
-Function Get-AzureADAccessTokenFromCert
+
+<# 
+ .Synopsis
+  Gets an access token based on a certificate credential
+
+ .Description
+  This function returns a string with the access token from a certificate credential to access the Azure AD Graph API.  
+
+ .Parameter TenantDomain
+  The domain name of the tenant you want the token for.
+
+ .Parameter ClientID
+  The client ID of the application that has the certificate
+
+ .Parameter Certificate
+  The X509Certificate2 certificate. The private key of the certificate should be accessible to obtain the access token
+  
+ .Example
+
+  $ReportingClientId = "9a0112fb-6626-4761-a96b-a5f433c69ef7"
+  $Cert = dir Cert:\LocalMachine\my\0EA8A7037A584C3C7BB54119D754DE1024AABAB2
+  $AccessToken = Get-AzureADGraphAPIAccessTokenFromCert  -TenantDomain "contoso.com" -ClientId $ReportingClientId -Certificate $Cert
+#>
+Function Get-AzureADGraphAPIAccessTokenFromCert
 {
     [CmdletBinding()]
     param
@@ -213,10 +269,34 @@ Function Get-AzureADAccessTokenFromCert
         [System.Security.Cryptography.X509Certificates.X509Certificate2]
         $Certificate
     )
-    $AadToken = [AdalHelper]::ObtainAadAccessTokenWithCert("https://login.windows.net/$TenantDomain/", $ClientId, $Certificate);
+    $AadToken = [AdalHelper]::ObtainAadAccessTokenWithCert("https://login.windows.net/$TenantDomain/", $Certificate, "https://graph.windows.net/", $ClientId);
     Write-Output $AadToken
 }
 
+
+<# 
+ .Synopsis
+  Performs a query against Azure AD Graph API.
+
+ .Description
+  This functions invokes the Azure AD Graph API and returns the results as objects in the pipeline. This function also traverses all pages of the query, if needed.
+
+ .Parameter TenantDomain
+  The domain name of the tenant you want the token for.
+
+ .Parameter AccessToken
+  Access token for Azure AD Graph API
+
+ .Parameter GraphQuery
+  The Query against Graph API
+  
+ .Example
+
+  $ReportingClientId = "9a0112fb-6626-4761-a96b-a5f433c69ef7"
+  $Cert = dir Cert:\LocalMachine\my\0EA8A7037A584C3C7BB54119D754DE1024AABAB2
+  $AccessToken = Get-AzureADGraphAPIAccessTokenFromCert  -TenantDomain "contoso.com" -ClientId $ReportingClientId -Certificate $Cert
+  $SignInLog = Invoke-AzureADGraphAPIQuery -AccessToken $AccessToken -TenantDomain $TenantDomain -GraphQuery "/activities/signinEvents?api-version=beta" 
+#>
 Function Invoke-AzureADGraphAPIQuery
 {
     [CmdletBinding()]
@@ -262,17 +342,37 @@ Function Invoke-AzureADGraphAPIQuery
     Write-Output $queryResults
 }
 
-Function Get-AzureADAppAssignmentQuery
+<# 
+ .Synopsis
+  Generates a Report of all assignments to applications.
+
+ .Description
+  This function queries all the applications, and for each one, obtain the list of role assignments.
+
+ .Parameter TenantDomain
+  The domain name of the tenant you want the token for.
+
+ .Parameter AccessToken
+  Access token for Azure AD Graph API
+
+  
+ .Example
+  $ReportingClientId = "9a0112fb-6626-4761-a96b-a5f433c69ef7"
+  $Cert = dir Cert:\LocalMachine\my\0EA8A7037A584C3C7BB54119D754DE1024AABAB2
+  $AccessToken = Get-AzureADGraphAPIAccessTokenFromCert  -TenantDomain "contoso.com" -ClientId $ReportingClientId -Certificate $Cert
+  $SignInLog = Invoke-AzureADAppAssignmentReport -AccessToken $AccessToken -TenantDomain $TenantDomain 
+#>
+Function Get-AzureADAppAssignmentReport
 {    
     [CmdletBinding()]
     param
     (       
         [Parameter(Mandatory=$true)]
         [string]
-        $TenantDomain, # For example, contoso.onmicrosoft.com    
+        $TenantDomain,  
         [Parameter(Mandatory=$true)]
         [string]
-        $AccessToken # For example, contoso.onmicrosoft.com,           
+        $AccessToken           
     )
     
     Write-Progress -Id 10 -Activity "Building app assignment report" -CurrentOperation "Getting list of applications" 
@@ -308,6 +408,67 @@ Function Get-AzureADAppAssignmentQuery
     Write-Output $results
 }
 
+<# 
+ .Synopsis
+  Adds certificate Credentials to an application 
+
+ .Description
+  This functions installs a client certificate credentials 
+
+ .Parameter ApplicationObjectId
+  The application Object ID that will be associated to the certificate credential
+  
+ .Example
+
+  $ReportingClientId = "9a0112fb-6626-4761-a96b-a5f433c69ef7"
+  $Cert = dir Cert:\LocalMachine\my\0EA8A7037A584C3C7BB54119D754DE1024AABAB2
+
+  New-AzureADApplicationCertificateCredential -ApplicationObjectId $ReportingClientId -Certificate $Cert
+  
+#>
+
+Function New-AzureADApplicationCertificateCredential
+{
+  param
+  (
+        [Parameter(Mandatory=$true)]
+        [string]
+        $ApplicationObjectId,
+        [Parameter(Mandatory=$true)]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]
+        $Certificate
+  )
+
+    $bin = $Certificate.GetRawCertData()
+    $base64Value = [System.Convert]::ToBase64String($bin)
+    $thumbprint = $Certificate.GetCertHash()
+    $base64Thumbprint = [System.Convert]::ToBase64String($thumbprint)
+
+    New-AzureADApplicationKeyCredential `
+        -ObjectId $ApplicationObjectId `
+        -CustomKeyIdentifier $base64Thumbprint `
+        -Type AsymmetricX509Cert `
+        -Usage Verify `
+        -Value $base64Value #`
+        #-StartDate $Certificate.GetEffectiveDateString() `
+        #-EndDate $Certificate.GetExpirationDateString()
+}
+
+
+<# 
+ .Synopsis
+  Removes all on premises synchronized users from a tenant
+
+ .Description
+  Removes all on premises synchronized users from a tenant. This cmdlet requires the Azure AD Powershell Module
+
+ .Parameter Force
+  When this parameter is set, then the confirmation message is not shown to the user.
+
+ .Example
+  Connect-MSOLService
+  Remove-AzureADOnPremUsers -Force
+#>
 Function Remove-AzureADOnPremUsers
 {
     [CmdletBinding()]
@@ -353,6 +514,17 @@ Function Remove-AzureADOnPremUsers
     }
 }
 
+<# 
+ .Synopsis
+  Installs this Powershell Module in the Powershell module path, downloading and copying the right dependencies 
+
+ .Description
+  This cmdlet copies the module in the module path, and downloads the ADAL library using Nuget
+
+ .Example
+  Install-AzureADUtilsModule
+
+#>
 function Install-AzureADUtilsModule
 {
     [CmdletBinding()]
@@ -416,14 +588,11 @@ function Install-AzureADUtilsModule
 
 }
 
-
-
-
-Export-ModuleMember Invoke-AzureADGraphAPIQuery
-Export-ModuleMember Get-AzureADAcessTokenFromConfidentialClient
-Export-ModuleMember Get-AzureADAppAssignmentQuery
-Export-ModuleMember Remove-AzureADOnPremUsers
 Export-ModuleMember Install-AzureADUtilsModule
-Export-ModuleMember Get-AzureADAccessTokenFromUser
-Export-ModuleMember Get-AzureADAccessTokenFromCert
-Export-ModuleMember Get-AzureADCertificateManifestInfo
+Export-ModuleMember New-AzureADApplicationCertificateCredential
+Export-ModuleMember Get-AzureADGraphAPIAccessTokenFromAppKey
+Export-ModuleMember Get-AzureADGraphAPIAccessTokenFromUser
+Export-ModuleMember Get-AzureADGraphAPIAccessTokenFromCert
+Export-ModuleMember Invoke-AzureADGraphAPIQuery
+Export-ModuleMember Get-AzureADAppAssignmentReport
+Export-ModuleMember Remove-AzureADOnPremUsers
