@@ -224,8 +224,6 @@ Function Get-AzureADGraphAPIAccessTokenFromUser
     }
     else
     {
-        
-
         $AadToken = [AdalHelper]::ObtainAadAccessTokenByPromptingUserCredential("https://login.windows.net/$TenantDomain/", "https://graph.windows.net/", $ClientId, $RedirectUri);
         Write-Output $AadToken
     }
@@ -318,6 +316,7 @@ Function Invoke-AzureADGraphAPIQuery
     $headerParams  = @{'Authorization'="Bearer $AccessToken"}
        
     $queryResults = @()
+    $originalUrl = "https://graph.windows.net/$TenantDomain/$GraphQuery"
     $queryUrl = "https://graph.windows.net/$TenantDomain/$GraphQuery"
     $queryCount = 0
 
@@ -334,7 +333,24 @@ Function Invoke-AzureADGraphAPIQuery
         }
         $queryCount = $queryResults.Count
         Write-Progress -Id 1 -Activity "Querying directory" -CurrentOperation "Retrieving results ($queryCount found so far)" 
-        $queryUrl = $batchResult | Select-Object -ExpandProperty "@odata.nextLink" -ErrorAction SilentlyContinue
+        $queryUrl = ""
+
+        $odataNextLink = $batchResult | Select-Object -ExpandProperty "@odata.nextLink" -ErrorAction SilentlyContinue
+
+        if ($odataNextLink -ne $null)
+        {
+            $queryUrl =  $odataNextLink
+        }
+        else
+        {
+            $odataNextLink = $batchResult | Select-Object -ExpandProperty "odata.nextLink" -ErrorAction SilentlyContinue
+            if ($odataNextLink -ne $null)
+            {
+                $absoluteUri = [Uri]"https://bogus/$odataNextLink"
+                $skipToken = $absoluteUri.Query.TrimStart("?")
+                $queryUrl = "$originalUrl&$skipToken"
+            }
+        }
     }
 
     Write-Progress -Id 1 -Activity "Querying directory" -Completed
@@ -406,6 +422,97 @@ Function Get-AzureADAppAssignmentReport
     Write-Progress -Id 10 -Activity "Building app assignment report" -Completed
 
     Write-Output $results
+}
+
+function Join($k, $l, $r) {
+    [pscustomobject]@{
+        Key    = $k
+        Left   = $l
+        Right  = $r
+    }
+}
+
+
+#Example adapted from: https://gist.githubusercontent.com/mlanza/d1a732df9b7519dd13b4/raw/9e2c53508d279ef6d2bf8cab1b8c9dd74541e8a4/Join-Object.ps1
+
+function Join-Object
+{
+    #EXAMPLE: Join-Object -left (Import-Csv $users) -leftKey { $_.Surname + ", " + $_.GivenName } -right (Import-Csv $dcas) -rightKey { $_."Last Name" + ", " + $_."First Name" }
+    Param(
+        $left,    #a table of data, possibily read from a csv
+        $leftKey, #a block that returns a value on which to match
+        $right,   #a table of data, possibily read from a csv
+        $rightKey #a block that returns a value on which to match
+    )
+
+
+    $l = $left  | Group $leftKey  -AsHashTable -AsString
+    $r = $right | Group $rightKey -AsHashTable -AsString
+
+    $l.Keys | ? {  $r.ContainsKey($_) } | % { Join $_ $l."$_" $r."$_" }
+    $l.Keys | ? { !$r.ContainsKey($_) } | % { Join $_ $l."$_" $null   }
+    $r.Keys | ? { !$l.ContainsKey($_) } | % { Join $_ $null   $r."$_" }
+}
+
+Function Get-AzureADAppStaleLicensingReport
+{
+    [CmdletBinding()]
+    param
+    (       
+        [Parameter(Mandatory=$true)]
+        [string]
+        $TenantDomain,  
+        [Parameter(Mandatory=$true)]
+        [string]
+        $AccessToken,
+        [Parameter(Mandatory=$true)]
+        [Int]
+        $CutOffDays
+    )
+    $CutOffDateFilter = "{0:s}Z" -f (Get-Date).AddDays(-1 * $CutOffDays)
+   
+    #Step 1: Get all sign ins from all folks
+    $signInActivity = Invoke-AzureADGraphAPIQuery -TenantDomain $TenantDomain -AccessToken $AccessToken -GraphQuery "/activities/signinEvents?api-version=beta&`$filter=signinDateTime ge $CutOffDateFilter"
+
+    #Step 2: Get all users
+    $allUsers = Get-AzureADUser -Top 1000000
+
+    #Step 3: Join both
+
+    $joinedSet = Join-Object -left $allUsers -right $signInActivity -leftKey {$_.userPrincipalName} -rightKey {$_.userPrincipalName}
+
+    #Step 4: Return the UPNs of the guys who have not logged in 
+
+    $staleUsers = $joinedSet | Where {$_.Right -eq $null}
+
+    $TenantSKUs = Get-AzureADSubscribedSku
+
+    foreach($staleUser in $staleUsers)
+    {
+        $userUPN = $staleUser.Key
+        $userSkus = $staleUser.Left.AssignedLicenses
+        
+        if ($userSkus -ne $null)
+        {
+
+            $skuString = ""
+
+            foreach ($userSku in $userSkus)
+            {
+                $skuName = $TenantSKUs | where {$_.SkuId -eq $userSku.SkuId} | Select-Object -ExpandProperty SkuPartNumber
+                $skuString +=  $skuName + ";"
+
+            }
+
+            $staleUserInfo = New-Object PSObject
+            $staleUserInfo  | Add-Member -MemberType NoteProperty -Name "UPN" -Value $staleUser.Key
+            $staleUserInfo  | Add-Member -MemberType NoteProperty -Name "SKUs" -Value $SkuString
+        
+            Write-Output $staleUserInfo
+        }
+    }
+
+
 }
 
 <# 
@@ -596,3 +703,4 @@ Export-ModuleMember Get-AzureADGraphAPIAccessTokenFromCert
 Export-ModuleMember Invoke-AzureADGraphAPIQuery
 Export-ModuleMember Get-AzureADAppAssignmentReport
 Export-ModuleMember Remove-AzureADOnPremUsers
+Export-ModuleMember Get-AzureADAppStaleLicensingReport
