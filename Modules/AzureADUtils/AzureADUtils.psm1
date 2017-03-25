@@ -556,9 +556,9 @@ Function New-AzureADApplicationCertificateCredential
         -CustomKeyIdentifier $base64Thumbprint `
         -Type AsymmetricX509Cert `
         -Usage Verify `
-        -Value $base64Value #`
-        #-StartDate $Certificate.GetEffectiveDateString() `
-        #-EndDate $Certificate.GetExpirationDateString()
+        -Value $base64Value `
+        -StartDate $Certificate.NotBefore `
+        -EndDate $Certificate.NotAfter
 }
 
 
