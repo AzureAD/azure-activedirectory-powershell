@@ -1,0 +1,1 @@
+[RemovePassthroughAuthenticationPreviewAgent.ps1](https://github.com/AzureAD/azure-activedirectory-powershell/tree/gh-pages/Scripts/RemovePassthroughAuthenticationPreviewAgent/RemovePassthroughAuthenticationPreviewAgent.ps1) is a PowerShell script you can use to uninstall the preview version of the Pass-through Authentication Agent.
