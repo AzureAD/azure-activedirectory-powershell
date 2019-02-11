@@ -9,7 +9,7 @@ For your security, we are not including human readable names in the Message Cent
 
 ## Step 2: Download the PowerShell Script
 You will use a PowerShell script to retrieve the UPNs. [Download the PowerShell script here](https://github.com/AzureAD/azure-activedirectory-powershell/tree/gh-pages/Scripts/RetrieveNames/RetrieveNames.ps1
-).
+). To download the PowerShell script, you can copy and paste the text from the aforementioned link into a text file and save it as a .ps1 file.
 
 >**Note:** Make sure that you have the AzureAD cmdlets installed. If you do not already have them installed, you can install them here: [Azure AD PowerShell for Graph](https://docs.microsoft.com/en-us/powershell/azure/active-directory/install-adv2?view=azureadps-2.0). 
 
