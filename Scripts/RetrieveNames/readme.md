@@ -32,5 +32,5 @@ Run the PowerShell script you downloaded in step 2, making sure to specify the t
 >**Note:** You may need to allow the downloaded script to run on your workstation by [unblocking downloaded PowerShell scripts](https://social.technet.microsoft.com/wiki/contents/articles/38496.unblock-downloaded-powershell-scripts.aspx).
 
 ```
-.\RetrieveUsers.ps1 -InputFilePath <path to your text file>
+.\RetrieveNames.ps1 -InputFilePath <path to your text file>
 ```
